@@ -1,0 +1,62 @@
+name: "Setup GitHub App"
+description: "This action generates a GitHub App token and optionally sets up git identity for the GitHub App. It is useful for workflows that require authentication as a GitHub App to perform actions such as commenting on pull requests or pushing commits."
+
+inputs:
+  app-client-id:
+    description: "The client ID of the GitHub App."
+    required: true
+  app-private-key:
+    description: "The private key of the GitHub App in PEM format."
+    required: true
+  auto-setup-git-identity:
+    description: "If true, automatically sets up git identity for the GitHub App."
+    required: false
+    default: true
+
+outputs:
+  app-token:
+    description: "The generated GitHub App token."
+    value: ${{ steps.get-user-id.outputs.app-token }}
+  app-slug:
+    description: "The slug of the GitHub App."
+    value: ${{ steps.get-user-id.outputs.app-slug }}
+  user-id:
+    description: "The user ID of the GitHub App."
+    value: ${{ steps.get-user-id.outputs.user-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate GitHub App Token
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+
+    - name: Get GitHub App User ID
+      id: get-user-id
+      if: ${{ steps.app-token.outputs.token != '' }}
+      shell: bash
+      run: |
+        echo "app-token=${{ steps.app-token.outputs.token }}" >> "$GITHUB_OUTPUT"
+        echo "app-slug=${{ steps.app-token.outputs.app-slug }}" >> "$GITHUB_OUTPUT"
+        echo "user-id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+    - name: Identity Setup for GitHub App
+      if: ${{ inputs.auto-setup-git-identity == 'true' }}
+      shell: bash
+      run: |
+        if [[ -n "${{ steps.app-token.outputs.app-slug }}" ]]; then
+          # Use GitHub App bot identity
+          git config --global user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
+          git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com'
+        else
+          # Fall back to GitHub Actions default bot
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        fi
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
